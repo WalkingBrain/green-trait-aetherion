@@ -46,5 +46,5 @@ def extract_sprites(sheet, rows, columns):
 
     return sprites
 
-def rescale(list_of_surfaces, new_width, new_height):
+def rescale(list_of_surfaces: list[pygame.Surface], new_width: int, new_height: int):
     return [pygame.transform.scale(surface, (new_width, new_height)) for surface in list_of_surfaces]
