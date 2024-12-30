@@ -1,8 +1,8 @@
 import pygame
-from utils import read_file_to_list
+from utils import read_file_to_list, path_correction
 
 class Sprite:
-    def __init__(self, texture_name, x: int, y: int, width: int, height: int, alpha=255, texture_directory="assets/textures/"):
+    def __init__(self, texture_name, x: int, y: int, width: int, height: int, alpha=255, texture_directory=path_correction("assets/textures/")):
         if isinstance(texture_name, pygame.Surface):
             self.surface = texture_name
         else:
@@ -16,11 +16,14 @@ class Sprite:
 
         self.width = width
         self.height = height
+        self.size = pygame.Vector2(width, height)
 
         self.alpha = alpha
+        self.hidden = False
 
     def render(self, surface: pygame.Surface):
-        
+        if self.hidden:
+            return None
         if hasattr(self, "hp"):
             if self.hp <= 0:
                 return None
@@ -28,7 +31,7 @@ class Sprite:
         self.surface.set_alpha(self.alpha)
         surface.blit(self.surface, self.pos)
 
-    def rect(self, transparent: bool=False):
+    def rect(self, transparent: bool=True):
         if hasattr(self, "hp"):
             if self.hp <= 0:
                 return pygame.Rect(0, 0, 0, 0)
@@ -40,15 +43,17 @@ class Sprite:
             return pygame.Rect(self.pos.x, self.pos.y, no_transparency.get_width(), no_transparency.get_height())
 
     def cap(self, screen, has_text=False, PADDING=10, text=None):
-        if text is None:
+        if text is None or text.height == 0:
             has_text = False
 
         self.pos.x = max(PADDING, min(self.pos.x, screen.get_width() - self.width))
         self.pos.y = max(text.height + 2 * PADDING if has_text else PADDING, min(self.pos.y, screen.get_height() - self.height - PADDING))
 
     def handle_collision(self, others: list):
-
-        collisions = [other for other, transparency in others if self.rect().colliderect(other.rect(transparency)) and self != other]
+        collisions = []
+        for other, transparency in others:
+            if self.rect().colliderect(other.rect(transparency)) and self != other and not (self.hidden or other.hidden):
+                collisions.append(other)
         return collisions
 
     def change_surface(self, texture_name, texture_directory="assets/textures/"):
@@ -62,7 +67,7 @@ class Sprite:
 
 
 class Dialogue:
-    def __init__(self, font: pygame.font, file_path, size, timing=3, color=(255, 255, 255), pos=pygame.Vector2(0, 0)):
+    def __init__(self, font: pygame.font, file_path, size, reading_speed=16, color=(255, 255, 255), pos=pygame.Vector2(0, 0)):
 
         self.file_path = file_path
         self.font_size = size
@@ -71,7 +76,8 @@ class Dialogue:
         self.line = 0
         self.text = self.dialogue[self.line]
 
-        self.timing = timing
+        self.reading_speed = reading_speed
+        self.timing = len(self.text) / self.reading_speed if self.text else 3
         self.time_since_last_line = 0
 
         self.surface = self.font.render(self.text, False, color)
@@ -86,18 +92,20 @@ class Dialogue:
 
     def update(self, dt, repeating=False):
         self.time_since_last_line += dt
+        
         if self.time_since_last_line >= self.timing:
             self.time_since_last_line -= self.timing
             self.line = (self.line + 1) % len(self.dialogue) if repeating else self.line + 1
 
             if self.line < len(self.dialogue):
                 self.text = self.dialogue[self.line]
+                self.timing = len(self.text.replace(" ", "")) / self.reading_speed if self.text else 3
             
             else:
                 self.text = ""
                 self.finished = True
 
-            self.surface = self.font.render(self.text, True, self.color)
+            self.surface = self.font.render(self.text, False, self.color)
             self.width = self.surface.get_width()
             self.height = self.surface.get_height()
 
@@ -106,7 +114,10 @@ class Dialogue:
         surface.blit(self.surface, self.pos)
 
 class Entity(Sprite):
-    def __init__(self, texture_name, x: int, y: int, width: int, height: int, hp, attack, text: Dialogue, time_to_respawn: float=5.0, invincibility_delay=0.5, alpha=255):
+
+    entities = {}
+
+    def __init__(self, texture_name, x: int, y: int, width: int, height: int, hp, attack, text: Dialogue, time_to_respawn: float=5.0, id="", invincibility_delay=0.5, alpha=255, aggro_range=0):
 
         self.max_hp = hp
         self.hp = hp
@@ -122,36 +133,44 @@ class Entity(Sprite):
 
         self.attacking = False
         self.started_attack = False
+        self.aggro_range = aggro_range
 
         self.invincibility_delay = invincibility_delay
         self.time_since_last_hit = invincibility_delay
 
         self.text = text
+        self.target = None
+
+        self.id = id if id else f"entity_{len(Entity.entities)}"
+        self.direction = 0 # 0 = right, 1 = up, 2 = left, 3 = down
+
+        Entity.entities[self.id] = self
 
         super().__init__(texture_name, x, y, width, height, alpha)
+   
 
     def calculate_percentage(self):
-        if self.hp > 0:
+        if self.hp > 0 and self.hp <= self.max_hp:
             return int(self.hp / self.max_hp * 25) - 1
         
-        else:
+        elif self.hp <= 0:
             return 0
+        
+        else:
+            return 24
     
-    def calc_kb(self, dt, attacker=None, scale=2, direction=None):
-        if not direction and attacker:
-            if attacker.pos.x > self.pos.x:
-                direction = "left"
-            elif attacker.pos.x < self.pos.x:
-                direction = "right"
-
-            else:
-                direction = "right"
-
-        match direction:
-            case "left":
-                self.vel.x -= scale * self.width / (dt)
-            case "right":
-                self.vel.x += scale * self.width / dt
+    def update_direction(self):
+        if self.vel.y > 0:
+            self.direction = "down"
+        
+        elif self.vel.y < 0:
+            self.direction = "up"
+            
+        if self.vel.x > 0:
+            self.direction = "right"
+        
+        elif self.vel.x < 0:
+            self.direction = "left"
 
     def handle_life(self, dt):
         if self.hp <= 0 and self.is_alive:
@@ -166,6 +185,20 @@ class Entity(Sprite):
                 self.hp = self.max_hp
 
         self.time_since_last_hit += dt
+
+        if self.vel.y > 0:
+            self.direction = "down"
+        
+        elif self.vel.y < 0:
+            self.direction = "up"
+
+            
+
+        if self.vel.x > 0:
+            self.direction = "right"
+        
+        elif self.vel.x < 0:
+            self.direction = "left"
 
     def take_damage(self, damage):
         if self.time_since_last_hit >= self.invincibility_delay:

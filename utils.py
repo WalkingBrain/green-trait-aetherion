@@ -1,7 +1,14 @@
 import pygame
 import os
 import sys
+from pathlib import Path
 
+def path_correction(path, to_prefix="_internal\\"):
+    if Path(to_prefix + path).exists() and False:
+        return resource_path(to_prefix + path)
+    else:
+        return path
+    
 def read_file_to_list(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
@@ -16,12 +23,18 @@ def read_file_to_list(file_path):
         return []
     
 def resource_path(relative_path):
-    try:
-        base_path = sys._MEIPASS
-    except AttributeError:
-        base_path = os.path.abspath(".")
+    """
+    Get the absolute path to a resource, works for development and PyInstaller.
     
-    return os.path.join(base_path, relative_path)
+    :param relative_path: Path to the resource (relative to the script or bundled app).
+    :return: Absolute path to the resource.
+    """
+    # When running as a bundle (PyInstaller)
+    if getattr(sys, '_MEIPASS', False):
+        return os.path.join(sys._MEIPASS, relative_path)
+    
+    # When running as a script
+    return os.path.join(os.path.abspath("."), relative_path)
 
 def extract_sprites(sheet, rows, columns):
     """
@@ -48,3 +61,12 @@ def extract_sprites(sheet, rows, columns):
 
 def rescale(list_of_surfaces: list[pygame.Surface], new_width: int, new_height: int):
     return [pygame.transform.scale(surface, (new_width, new_height)) for surface in list_of_surfaces]
+
+def flip(list_of_surfaces: list[pygame.Surface], horizontal: bool, vertical: bool):
+    return [pygame.transform.flip(surface, horizontal, vertical) for surface in list_of_surfaces]
+
+def clamp_velocity(velocity, max_speed):
+    velocity.x = max(-max_speed, min(velocity.x, max_speed))
+    velocity.y = max(-max_speed, min(velocity.y, max_speed))
+    return velocity
+
